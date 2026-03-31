@@ -15,6 +15,7 @@
 # limitations under the License.
 
 # [START gke_checkoutservice_genproto]
+#
 
 PATH=$PATH:$(go env GOPATH)/bin
 protodir=../../protos
