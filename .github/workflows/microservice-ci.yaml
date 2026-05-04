@@ -58,7 +58,7 @@ jobs:
           severity: HIGH,CRITICAL
           exit-code: 0
           vuln-type: os,library
-
+# exit-code: 0 ensures that the workflow continues even if vulnerabilities are found, allowing us to report them without failing the build. You can adjust this based on your policy (e.g., exit-code: 1 to fail on vulnerabilities).
       # -------------------
       # Push image (only if scan passes)
       # -------------------

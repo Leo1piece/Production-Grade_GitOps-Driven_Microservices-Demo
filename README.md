@@ -544,7 +544,7 @@ Installation of Gateway API CRDs
     ```
     
 - Installation of LBC Gateway API specific CRDs:
-    
+    这个 CRD 是 ？
     ```bash
     kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/aws-load-balancer-controller/refs/heads/main/config/crd/gateway/gateway-crds.yaml
     ```
@@ -553,6 +553,15 @@ Installation of Gateway API CRDs
 > [!NOTE]
 >
 >All the configs are already availbale in their respective directories, We can use them or copy from this guide and configure on your own.
+需要cd  gateway-api-manifests， 然后 k apply 
+exposing the application in k8s is needed, 
+有这几种方法  
+- Ingress -- allow mutliple service use 1 only the loadbalancer，
+- Gateway API - support multiple protocal,
+- cluster ip --  主要用于 
+- NodePort   (每一个node的)
+- LoadBalancer -- create elb/alb 
+![alt text](image.png)
 
 Create a gateway class:
 
@@ -623,6 +632,7 @@ spec:
     protocol: HTTP
     port: 80
     hostname: "*.devopsdock.site"
+    # 这个是 gateway api的配置，包含 listers   http https, 然后allowed routesfrom specific namepsce 
     allowedRoutes:
       namespaces:
         from: All
@@ -649,14 +659,16 @@ kubectl get gateway
 NAME              CLASS                   ADDRESS                                                                  PROGRAMMED   AGE
 app-alb-gateway   aws-alb-gateway-class   k8s-default-appalbga-65aa25bc91-1838810992.us-east-1.elb.amazonaws.com   Unknown      5s
 ```
+通过ui 验证也能看到一个 loadbanlancer
 
 ## **Deploying External DNS:**
-
+dot doing manual dns record,
 Docs: 
 
 - [https://github.com/kubernetes-sigs/external-dns/blob/master/docs/tutorials/aws.md#using-helm-with-oidc](https://github.com/kubernetes-sigs/external-dns/blob/master/docs/tutorials/aws.md#using-helm-with-oidc)
 - [https://kubernetes-sigs.github.io/external-dns/v0.13.1/tutorials/gateway-api/#manifest-with-rbac](https://kubernetes-sigs.github.io/external-dns/v0.13.1/tutorials/gateway-api/#manifest-with-rbac) (How to setup with GatewayAPI)
 
+一样的， 还是需要permission ChangeResourceRecordSets
 Create a file with below content for IAM policy:
 
 vi `policy.json`
@@ -700,7 +712,8 @@ export POLICY_ARN=$(aws iam list-policies \
  
 export EKS_CLUSTER_NAME=test-terraform-cluster
 ```
-
+pod identity agent newers metho IRSPA, pilicityly add the role 
+idenity agent 不需要explicititly
 ## **We will use pod identity agent for the external dns setup:**
 
 We have created this addon while creating the cluster, so igonre this step.
@@ -726,7 +739,7 @@ Create a namespace:
 ```bash
 kubectl create ns external-dns
 ```
-
+需要create  podidentiteyassocation 然后 sa  role name
 ```bash
 eksctl create podidentityassociation \
   --cluster $EKS_CLUSTER_NAME \
@@ -737,9 +750,10 @@ eksctl create podidentityassociation \
 ```
 
 **Deploy ExternalDNS using Pod Identity**
-
+升级 IRSA 到 poid identity agent
 Unlike the IRSA method, Pod Identity requires no further steps, nor service account annotations, since the pod identity association will bind the service account to the given IAM role, hence to a policy holding the requested set of permissions. The EKS Pod Identity Agent handles credential injection at runtime.
 
+然后安装 external-dns 使用 helm 
 Add the Repo:
 
 ```bash
@@ -766,13 +780,13 @@ external-dns-6f95d4687d-6tc2g   1/1     Running   0          94s
 ```
 
 Get the values file:
-
+这个常用，需要看一下  value file on the helm， 比如说有， 当
 ```bash
 helm show values external-dns/external-dns --version 1.20.0 > external-dns-values-1.20.0.yaml
 ```
 
 Edit the value:
-
+当有任何  svc, ingress, gateway 等变化的时候，检测并 change  dns record,
 ```bash
 sources:
   - service
@@ -808,7 +822,7 @@ helm show values argo/argo-cd --version 9.4.0 > argocd-values-9.4.0.yaml
 Modify the values file:
 
 Add this ”`server.insecure: true`”  line explicitly :
-
+我们需要指出，如果没有 tls 那么就是insecure
 If TLS is terminated at the **Ingress / Load Balancer**, ArgoCD should run in **insecure mode** internally.
 
 ```bash
@@ -820,8 +834,12 @@ If TLS is terminated at the **Ingress / Load Balancer**, ArgoCD should run in **
 ```
 
 Add this `kustomize.buildOptions: "--enable-helm` line in the `config` section as Kustomize is require to combine the helm values and manifest file.
-
+我们的 application 会 deployed by helm
 - Helm support inside Kustomize is considered an **unsafe plugin**, so it is disabled.
+
+![alt text](image-1.png)
+
+
 - You must explicitly allow it.
 
 ```bash
@@ -834,6 +852,8 @@ configs:
     kustomize.buildOptions: "--enable-helm"
 
 ```
+
+我们还需要enable http route， 因为我们使用gateway api
 
 ```bash
   httproute:
@@ -864,7 +884,7 @@ configs:
 ```
 
 Install the chart:
-
+当我们安装这个 chart的时候，会添加 新的record,但是 在 listenrs and rules 是没有的，所以接下来哦我们还需要添加 target group
 ```bash
 helm install argo-cd argo/argo-cd -n argocd -f argocd-values-9.4.0.yaml --version 9.4.0 --create-namespace
 ```
@@ -891,8 +911,16 @@ Apply:
 ```bash
 kubectl apply -f target-grp-config.yaml 
 ```
+virfiy cate  
+![alt text](image-2.png)
 
+debug, k logs  pod-name
+错误是  eror, no ec2 imds role found， the pod didnt get the role， 我们去ui 看来把role删除, cloudformation 查看这个 statck，这个 stack  失败了，
+![alt text](image-3.png)
 
+![alt text](image-4.png)
+然后重新添加eks create poid ientitiy assocation  , 一个 iam role 不能在两个 cloudformation stack中？？？？ 防止 confilict
+k get targetconfiguratn -n argocd
 > [!NOTE]
 >`TargetGroupConfiguration` is **ONLY** for:
 >
@@ -1060,6 +1088,17 @@ As the permission is set now. We will add the workflow files now.
 
 Create a directory at the root level of the repo.
 
+这里有讲解 ， helm-chart  applicatione, ,每一个 sevice.ymal， 有单独specic的 image,和 version tag 或者使用default tag
+
+讲解，他是如何变成自己的image 
+docker pull   :vo.10.5 
+然后 retag 
+docker tag  :vo.10.5 ghcr.io/laxmikantagiri/microservices-demo/frontend:v0.10.5
+docker images
+docker push images  在github中的 packages中有所有的 image
+
+![alt text](image-5.png)
+
 ```bash
 mkdir -p .github/workflows
 ```
@@ -1167,11 +1206,11 @@ on:
     branches: [ main ]
     paths:
       - "src/**"
-
+如果这个 change 来自于 src中的 所有的 miscriosvc的 change,
 permissions:
   contents: read
   packages: write
-
+有不同的job 和 job中的 steps
 jobs:
   # -------------------------------
   # Job 1: Detect changed services
@@ -1180,7 +1219,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       services: ${{ steps.changed.outputs.services }}
-
+  
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -1247,7 +1286,7 @@ In the earlier step we have installed and exposed the argocd.
 Our application code , helm chart and Helm values are already in the repo.
 
 Additionally to expose our application via Gateway API we need `httproute` and `targetgroupconfiguration` files which you can keep in the separate directory in the root.
-
+target goup 是一个 bridge between  aws and k8s cluster
 In our case i kept in `microservices-extra-kube-manifests/` folder in the root directory.
 
 - **Create target group configurations for the app `frontend` service.**
@@ -1270,7 +1309,7 @@ In our case i kept in `microservices-extra-kube-manifests/` folder in the root d
   
     
 - **Create the HTTProute for the app so that it will get attached with the gateway and add as a listener in the load balancer.**
-    
+    一个 gateway 就是 一个 loadbalncer， 
     `microservices-extra-kube-manifests/HTTProute.yaml` 
     
     ```bash
@@ -1301,7 +1340,7 @@ In our case i kept in `microservices-extra-kube-manifests/` folder in the root d
     
 - ArgoCD can deploy **multiple sources from one repo** inside a single Application using `Kustomize`.
 - Kustomize render it as a single manifest file.
-
+![alt text](image-6.png)
 So first Lets create kustomization config and we will attach that as source.
 
 ### Why This Is The Best Pattern
@@ -1546,7 +1585,7 @@ In our case the repo is public so its not required.
 Install the chart:
 
 ```bash
-helm install argocd-image-updater argo/argocd-image-updater -n argocd --version 1.0.5
+helm install argocd-image-updater argo/argocd-image-updater -n argocd --version 1.0.5  
 ```
 
 Make sure its running:
@@ -1569,6 +1608,7 @@ Add `imageupdater` CR
 
 `image-updater.yaml`
 
+如果发现新image, 这些tag  如果符合 reg exp 从sha 开始。
 ```bash
 apiVersion: argocd-image-updater.argoproj.io/v1alpha1
 kind: ImageUpdater

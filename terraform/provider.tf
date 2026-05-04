@@ -11,3 +11,4 @@ provider "aws" {
   region = "us-east-1"
 }
 
+#  定义  required_provders{}   这应该算什么？算是 json 吗
